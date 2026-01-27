@@ -1,0 +1,36 @@
+name: Deploy Correcteur
+
+on:
+  push:
+    branches: [ "main" ]
+
+concurrency:
+  group: deploy-gptwrapper-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            TARGET_DIR="/var/www/gptwrapper"
+            
+            echo "Deploying to $TARGET_DIR..."
+            cd "$TARGET_DIR"
+            
+            # Update Code (As 'deploy' user)
+            echo "Pulling latest code..."
+            sudo -u deploy git pull origin main
+            
+            # Run Deployment Script (As 'deploy' user)
+            chmod +x deploy.sh
+            
+            echo "Executing deploy.sh..."
+            sudo -u deploy ./deploy.sh
