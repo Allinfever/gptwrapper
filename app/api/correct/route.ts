@@ -1,15 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { createClient } from '@/lib/supabase/server';
 import { RateLimiter } from '@/lib/rateLimiter';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// Fallback rate limiter for anonymous users
 const rateLimiter = new RateLimiter();
 
 const MAX_CHARS = 12000;
-const DAILY_LIMIT = 10;
+const DAILY_LIMIT_ANONYMOUS = 10;
+const DAILY_LIMIT_AUTHENTICATED = 50; // Higher limit for logged-in users
 
 const SYSTEM_PROMPT = `Tu es un correcteur orthographique et grammatical expert en français.
 
@@ -66,23 +69,60 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Rate limiting
-    const clientId = getClientIdentifier(request);
-    const rateLimitCheck = rateLimiter.checkLimit(clientId, DAILY_LIMIT);
+    // Check authentication and rate limiting
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    let dailyLimit: number;
+    let remaining: number;
+    let isAuthenticated = false;
 
-    if (!rateLimitCheck.allowed) {
-      return NextResponse.json(
-        { 
-          error: 'Limite quotidienne atteinte',
-          remaining_today: rateLimitCheck.remaining,
-          limit_today: DAILY_LIMIT
-        },
-        { status: 429 }
-      );
+    if (user) {
+      // Authenticated user - use Supabase-based quota
+      isAuthenticated = true;
+      dailyLimit = DAILY_LIMIT_AUTHENTICATED;
+      
+      // Get remaining corrections from Supabase
+      const { data: remainingData } = await supabase
+        .rpc('get_remaining_corrections', { 
+          p_user_id: user.id, 
+          p_daily_limit: dailyLimit 
+        });
+      
+      remaining = remainingData ?? dailyLimit;
+      
+      if (remaining <= 0) {
+        return NextResponse.json(
+          { 
+            error: 'Limite quotidienne atteinte',
+            remaining_today: 0,
+            limit_today: dailyLimit
+          },
+          { status: 429 }
+        );
+      }
+      
+      console.log(`[Correction] User: ${user.id.substring(0, 8)}... | Remaining: ${remaining}/${dailyLimit}`);
+    } else {
+      // Anonymous user - use IP-based rate limiting
+      dailyLimit = DAILY_LIMIT_ANONYMOUS;
+      const clientId = getClientIdentifier(request);
+      const rateLimitCheck = rateLimiter.checkLimit(clientId, dailyLimit);
+
+      if (!rateLimitCheck.allowed) {
+        return NextResponse.json(
+          { 
+            error: 'Limite quotidienne atteinte. Connectez-vous pour obtenir plus de corrections !',
+            remaining_today: rateLimitCheck.remaining,
+            limit_today: dailyLimit
+          },
+          { status: 429 }
+        );
+      }
+      
+      remaining = rateLimitCheck.remaining;
+      console.log(`[Correction] Anonymous: ${clientId.substring(0, 8)}... | Remaining: ${remaining}/${dailyLimit}`);
     }
-
-    // Appel à OpenAI
-    console.log(`[Correction] Client: ${clientId.substring(0, 8)}... | Remaining: ${rateLimitCheck.remaining}/${DAILY_LIMIT}`);
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
@@ -114,15 +154,31 @@ export async function POST(request: NextRequest) {
       throw new Error('Format de réponse invalide');
     }
 
-    // Enregistrer l'utilisation
-    rateLimiter.recordUsage(clientId);
+    // Record usage
+    if (user) {
+      // Authenticated: increment in Supabase
+      await supabase.rpc('increment_correction_count', { p_user_id: user.id });
+      
+      // Optionally save to corrections history
+      await supabase.from('corrections').insert({
+        user_id: user.id,
+        original_text: text,
+        corrected_text,
+        rules_applied: Array.isArray(rules_applied) ? rules_applied : [],
+        char_count: text.length,
+      });
+    } else {
+      // Anonymous: use in-memory rate limiter
+      const clientId = getClientIdentifier(request);
+      rateLimiter.recordUsage(clientId);
+    }
 
     // Retourner la réponse
     return NextResponse.json({
       corrected_text,
       rules_applied: Array.isArray(rules_applied) ? rules_applied : [],
-      remaining_today: rateLimitCheck.remaining - 1,
-      limit_today: DAILY_LIMIT,
+      remaining_today: remaining - 1,
+      limit_today: dailyLimit,
     });
 
   } catch (error) {

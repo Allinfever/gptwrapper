@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { Copy, Check, AlertCircle, Loader2 } from 'lucide-react';
+import { UserMenu } from '@/components/UserMenu';
 
 const MAX_CHARS = 12000;
 const EXAMPLE_TEXT = `Bonjour,
@@ -98,6 +99,7 @@ export default function AppPage() {
             <span className="text-sm text-gray-600">
               {quota.remaining}/{quota.limit} corrections aujourd'hui
             </span>
+            <UserMenu />
           </div>
         </div>
       </header>
