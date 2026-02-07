@@ -61,8 +61,8 @@ export default function PricingPage() {
                     <button
                         onClick={() => setBillingPeriod('monthly')}
                         className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all ${billingPeriod === 'monthly'
-                                ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md'
-                                : 'text-gray-600 hover:text-gray-900'
+                            ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md'
+                            : 'text-gray-600 hover:text-gray-900'
                             }`}
                     >
                         Mensuel
@@ -70,8 +70,8 @@ export default function PricingPage() {
                     <button
                         onClick={() => setBillingPeriod('yearly')}
                         className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${billingPeriod === 'yearly'
-                                ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md'
-                                : 'text-gray-600 hover:text-gray-900'
+                            ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md'
+                            : 'text-gray-600 hover:text-gray-900'
                             }`}
                     >
                         Annuel
@@ -321,7 +321,7 @@ function FAQItem({ question, answer }: { question: string; answer: string }) {
                 <span className={`text-gray-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''
                     }`}>
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="width" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                     </svg>
                 </span>
             </button>
