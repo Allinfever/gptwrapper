@@ -1,4 +1,5 @@
 // Types pour l'historique, le glossaire et les abonnements
+import { CorrectionMode } from './correction';
 
 // ============================================
 // HISTORIQUE
