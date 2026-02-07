@@ -1,9 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import Link from 'next/link';
-import { Copy, Check, AlertCircle, Loader2 } from 'lucide-react';
+import { Copy, Check, AlertCircle, Loader2, Sparkles, History, BookOpen } from 'lucide-react';
 import { UserMenu } from '@/components/UserMenu';
+import { ModeSelector } from '@/components/correction/ModeSelector';
+import { DiffViewer } from '@/components/correction/DiffViewer';
+import { StatsDisplay } from '@/components/correction/StatsDisplay';
+import { applyChanges } from '@/lib/diff/textDiffer';
+import type { CorrectionResponse, CorrectionMode } from '@/lib/types/correction';
 
 const MAX_CHARS = 12000;
 const EXAMPLE_TEXT = `Bonjour,
@@ -14,21 +19,24 @@ Merci pour votre retour.
 
 Cordialement`;
 
-interface CorrectionResponse {
-  corrected_text: string;
-  rules_applied: string[];
-  remaining_today: number;
-  limit_today: number;
-}
-
 export default function AppPage() {
   const [inputText, setInputText] = useState('');
-  const [correctedText, setCorrectedText] = useState('');
-  const [rulesApplied, setRulesApplied] = useState<string[]>([]);
+  const [mode, setMode] = useState<CorrectionMode>('standard');
+  const [correctionData, setCorrectionData] = useState<CorrectionResponse | null>(null);
+  const [acceptedChanges, setAcceptedChanges] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
   const [quota, setQuota] = useState({ remaining: 10, limit: 10 });
+
+  const finalText = useMemo(() => {
+    if (!correctionData) return '';
+    if (correctionData.changes.length === 0) return correctionData.corrected_text;
+    if (acceptedChanges.size === correctionData.changes.length) {
+      return correctionData.corrected_text;
+    }
+    return applyChanges(inputText, correctionData.changes, acceptedChanges);
+  }, [correctionData, acceptedChanges, inputText]);
 
   const handleCorrect = async () => {
     if (!inputText.trim()) {
@@ -37,38 +45,35 @@ export default function AppPage() {
     }
 
     if (inputText.length > MAX_CHARS) {
-      setError(`Le texte ne peut pas dépasser ${MAX_CHARS} caractères`);
+      setError(`Le texte ne peut pas dépasser ${MAX_CHARS.toLocaleString()} caractères`);
       return;
     }
 
     setIsLoading(true);
     setError('');
-    setCorrectedText('');
-    setRulesApplied([]);
+    setCorrectionData(null);
+    setAcceptedChanges(new Set());
 
     try {
       const response = await fetch('/api/correct', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ text: inputText }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: inputText, mode }),
       });
 
       if (!response.ok) {
-        if (response.status === 429) {
-          throw new Error('Limite quotidienne atteinte. Revenez demain !');
-        }
-        if (response.status === 413) {
-          throw new Error('Texte trop long');
-        }
+        const errorData = await response.json().catch(() => ({}));
+        if (errorData.error) throw new Error(errorData.error);
+        if (response.status === 429) throw new Error('Limite quotidienne atteinte');
+        if (response.status === 413) throw new Error('Texte trop long');
+        if (response.status === 503) throw new Error('Service temporairement indisponible');
         throw new Error('Erreur lors de la correction');
       }
 
       const data: CorrectionResponse = await response.json();
-      setCorrectedText(data.corrected_text);
-      setRulesApplied(data.rules_applied);
+      setCorrectionData(data);
       setQuota({ remaining: data.remaining_today, limit: data.limit_today });
+      setAcceptedChanges(new Set(data.changes.map(c => c.id)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Une erreur est survenue');
     } finally {
@@ -77,157 +82,242 @@ export default function AppPage() {
   };
 
   const handleCopy = async () => {
-    if (correctedText) {
-      await navigator.clipboard.writeText(correctedText);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+    await navigator.clipboard.writeText(finalText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleAcceptAll = () => {
+    if (correctionData) {
+      setAcceptedChanges(new Set(correctionData.changes.map(c => c.id)));
     }
+  };
+
+  const handleAcceptChange = (changeId: string) => {
+    setAcceptedChanges(prev => {
+      const newSet = new Set(prev);
+      newSet.add(changeId);
+      return newSet;
+    });
+  };
+
+  const handleRejectChange = (changeId: string) => {
+    setAcceptedChanges(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(changeId);
+      return newSet;
+    });
   };
 
   const charCount = inputText.length;
   const charPercentage = (charCount / MAX_CHARS) * 100;
 
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-blue-50/20">
       {/* Header */}
-      <header className="border-b bg-white">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
-          <Link href="/" className="text-2xl font-bold text-gray-900 hover:text-blue-600 transition">
-            Correcteur
-          </Link>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-gray-600">
-              {quota.remaining}/{quota.limit} corrections aujourd'hui
-            </span>
-            <UserMenu />
+      <header className="glass sticky top-0 z-50 border-b border-gray-200/50">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <Link href="/" className="flex items-center gap-2 group">
+              <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center shadow-md group-hover:shadow-lg transition-shadow">
+                <span className="text-white font-bold text-lg">C</span>
+              </div>
+              <span className="text-xl font-semibold text-gray-900">Correcteur</span>
+            </Link>
+
+            <div className="flex items-center gap-4">
+              {/* Quota */}
+              <div className="hidden md:flex items-center gap-2 px-4 py-2 bg-white rounded-lg border border-gray-200 shadow-sm">
+                <Sparkles className="w-4 h-4 text-blue-600" />
+                <span className="text-sm font-medium text-gray-700">
+                  {quota.remaining}/{quota.limit}
+                </span>
+                <span className="text-xs text-gray-500">corrections</span>
+              </div>
+
+              {/* Navigation */}
+              <Link
+                href="/app/history"
+                className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors hidden md:flex items-center gap-2"
+                title="Historique"
+              >
+                <History className="w-4 h-4" />
+                Historique
+              </Link>
+
+              <Link
+                href="/app/glossary"
+                className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors hidden md:flex items-center gap-2"
+                title="Glossaire"
+              >
+                <BookOpen className="w-4 h-4" />
+                Glossaire
+              </Link>
+
+              <UserMenu />
+            </div>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-8">
+      <main className="max-w-7xl mx-auto px-6 py-8">
         <div className="grid lg:grid-cols-2 gap-6">
           {/* Input Section */}
-          <div className="space-y-4">
-            <div className="bg-white rounded-lg shadow-sm border p-4">
-              <div className="flex justify-between items-center mb-3">
+          <div className="space-y-6 animate-fade-in">
+            {/* Mode Selector */}
+            <ModeSelector
+              selectedMode={mode}
+              onModeChange={setMode}
+              disabled={isLoading}
+            />
+
+            {/* Input Card */}
+            <div className="card">
+              <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold text-gray-900">Texte à corriger</h2>
                 <button
                   onClick={() => setInputText(EXAMPLE_TEXT)}
-                  className="text-sm text-blue-600 hover:text-blue-700"
+                  className="text-sm text-blue-600 hover:text-blue-700 font-medium transition-colors"
                 >
                   Exemple
                 </button>
               </div>
+
               <textarea
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
-                placeholder="Collez ici votre email, message ou texte professionnel..."
-                className="w-full h-96 p-4 border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="Collez votre email, message ou texte professionnel ici..."
+                className="w-full min-h-[200px] p-4 text-[15px] bg-white border-2 border-gray-200 rounded-xl transition-all outline-none resize-vertical focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(91,127,255,0.1)] placeholder:text-gray-400"
+                disabled={isLoading}
               />
-              <div className="flex justify-between items-center mt-2">
-                <div className="text-sm text-gray-500">
-                  {charCount.toLocaleString()} / {MAX_CHARS.toLocaleString()} caractères
+
+              {/* Character Count */}
+              <div className="mt-3 flex items-center justify-between">
+                <div className="flex-1 mr-4">
+                  <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-300 rounded-full ${charPercentage > 90 ? 'bg-red-500' :
+                        charPercentage > 70 ? 'bg-yellow-500' :
+                          'bg-blue-500'
+                        }`}
+                      style={{ width: `${Math.min(charPercentage, 100)}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="w-32 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                  <div 
-                    className={`h-full transition-all ${charPercentage > 90 ? 'bg-red-500' : 'bg-blue-500'}`}
-                    style={{ width: `${Math.min(charPercentage, 100)}%` }}
-                  />
-                </div>
+                <span className={`text-xs font-medium ${charPercentage > 90 ? 'text-red-600' : 'text-gray-500'
+                  }`}>
+                  {charCount.toLocaleString()} / {MAX_CHARS.toLocaleString()}
+                </span>
               </div>
-            </div>
-            <button
-              onClick={handleCorrect}
-              disabled={isLoading || !inputText.trim() || quota.remaining === 0}
-              className="w-full px-6 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-semibold text-lg disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  Correction en cours...
-                </>
-              ) : (
-                'Corriger mon texte'
+
+              {/* Error Message */}
+              {error && (
+                <div className="mt-4 flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg animate-fade-in">
+                  <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                  <p className="text-sm text-red-800">{error}</p>
+                </div>
               )}
-            </button>
+
+              {/* Correct Button */}
+              <button
+                onClick={handleCorrect}
+                disabled={isLoading || !inputText.trim()}
+                className="w-full mt-6 px-6 py-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white font-semibold rounded-xl shadow-lg shadow-blue-500/25 hover:shadow-xl hover:shadow-blue-500/35 hover:-translate-y-0.5 active:translate-y-0 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 flex items-center justify-center gap-2 text-base"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Correction en cours...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-5 h-5" />
+                    Corriger mon texte
+                  </>
+                )}
+              </button>
+            </div>
           </div>
 
-          {/* Output Section */}
-          <div className="space-y-4">
-            {error && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
-                <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-                <p className="text-red-800">{error}</p>
-              </div>
-            )}
-
-            {correctedText && (
+          {/* Results Section */}
+          <div className="space-y-6 animate-fade-in" style={{ animationDelay: '100ms' }}>
+            {correctionData ? (
               <>
-                <div className="bg-white rounded-lg shadow-sm border p-4">
-                  <div className="flex justify-between items-center mb-3">
-                    <h2 className="text-lg font-semibold text-gray-900">Texte corrigé</h2>
-                    <button
-                      onClick={handleCopy}
-                      className="flex items-center gap-2 px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg transition"
-                    >
-                      {copied ? (
-                        <>
-                          <Check className="w-4 h-4 text-green-600" />
-                          <span className="text-green-600">Copié !</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-4 h-4" />
-                          Copier
-                        </>
-                      )}
-                    </button>
-                  </div>
-                  <div className="p-4 border border-gray-200 rounded-lg bg-gray-50 min-h-96 whitespace-pre-wrap font-serif text-gray-900 leading-relaxed">
-                    {correctedText}
-                  </div>
-                </div>
+                {/* Stats */}
+                <StatsDisplay stats={correctionData.stats} />
 
-                {rulesApplied.length > 0 && (
-                  <div className="bg-white rounded-lg shadow-sm border p-4">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-3">Règles appliquées</h3>
-                    <ul className="space-y-2">
-                      {rulesApplied.map((rule, index) => (
-                        <li key={index} className="flex items-start gap-2 text-sm text-gray-700">
-                          <span className="text-blue-600 font-bold">•</span>
-                          <span>{rule}</span>
-                        </li>
-                      ))}
-                    </ul>
+                {/* Diff Viewer */}
+                {correctionData.changes.length > 0 ? (
+                  <DiffViewer
+                    originalText={inputText}
+                    correctedText={correctionData.corrected_text}
+                    changes={correctionData.changes}
+                    onAcceptAll={handleAcceptAll}
+                    onAcceptChange={handleAcceptChange}
+                    onRejectChange={handleRejectChange}
+                    acceptedChanges={acceptedChanges}
+                  />
+                ) : (
+                  <div className="card text-center">
+                    <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <Check className="w-8 h-8 text-green-600" />
+                    </div>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                      Aucune erreur détectée !
+                    </h3>
+                    <p className="text-gray-600">
+                      Votre texte est parfait, aucune correction nécessaire.
+                    </p>
+                  </div>
+                )}
+
+                {/* Final Text */}
+                {finalText && (
+                  <div className="card">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-semibold text-gray-900">Texte corrigé</h3>
+                      <button
+                        onClick={handleCopy}
+                        className="px-4 py-2 text-sm font-medium bg-white text-gray-700 border-2 border-gray-200 rounded-lg hover:border-gray-300 hover:shadow-sm transition-all flex items-center gap-2"
+                      >
+                        {copied ? (
+                          <>
+                            <Check className="w-4 h-4 text-green-600" />
+                            Copié !
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-4 h-4" />
+                            Copier
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                      <p className="text-gray-900 whitespace-pre-wrap leading-relaxed">
+                        {finalText}
+                      </p>
+                    </div>
                   </div>
                 )}
               </>
-            )}
-
-            {!correctedText && !error && (
-              <div className="bg-white rounded-lg shadow-sm border p-8 text-center text-gray-400">
-                <p>Le texte corrigé apparaîtra ici...</p>
+            ) : (
+              <div className="card text-center py-12">
+                <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Sparkles className="w-8 h-8 text-blue-600" />
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                  Prête à corriger ?
+                </h3>
+                <p className="text-gray-600 max-w-md mx-auto">
+                  Collez votre texte à gauche et cliquez sur "Corriger mon texte" pour commencer.
+                </p>
               </div>
             )}
           </div>
         </div>
       </main>
-
-      {/* Footer */}
-      <footer className="border-t bg-white py-6 px-4 mt-12">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-gray-600">
-          <p>© 2026 Correcteur. Tous droits réservés.</p>
-          <div className="flex gap-6">
-            <Link href="/privacy" className="hover:text-gray-900 transition">
-              Confidentialité
-            </Link>
-            <Link href="/legal" className="hover:text-gray-900 transition">
-              Mentions légales
-            </Link>
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }
