@@ -1,14 +1,14 @@
 import { CorrectionMode } from '../types/correction';
 
 export const CORRECTION_MODES = {
-    'typo-only': {
-        id: 'typo-only' as const,
-        label: 'Typo uniquement',
-        description: 'Corrige seulement les fautes de frappe évidentes',
-        icon: 'Zap',
-        badge: 'Rapide',
-        color: 'green',
-        promptModifier: `Tu es un correcteur minimaliste.
+  'typo-only': {
+    id: 'typo-only' as const,
+    label: 'Typo uniquement',
+    description: 'Corrige seulement les fautes de frappe évidentes',
+    icon: 'Zap',
+    badge: 'Rapide',
+    color: 'green',
+    promptModifier: `Tu es un correcteur minimaliste.
 
 RÈGLES STRICTES :
 - Corrige UNIQUEMENT les fautes de frappe manifestes (lettres manquantes, inversées, doublées par erreur)
@@ -39,15 +39,15 @@ FORMAT DE SORTIE (JSON strict):
     }
   ]
 }`
-    },
-    'standard': {
-        id: 'standard' as const,
-        label: 'Standard',
-        description: 'Orthographe, grammaire, accords (recommandé)',
-        icon: 'CheckCircle2',
-        badge: 'Recommandé',
-        color: 'blue',
-        promptModifier: `Tu es un correcteur orthographique et grammatical expert en français.
+  },
+  'standard': {
+    id: 'standard' as const,
+    label: 'Standard',
+    description: 'Orthographe, grammaire, accords (recommandé)',
+    icon: 'CheckCircle2',
+    badge: 'Recommandé',
+    color: 'blue',
+    promptModifier: `Tu es un correcteur orthographique et grammatical expert en français.
 
 RÈGLES STRICTES :
 - Corrige UNIQUEMENT l'orthographe, la grammaire, la conjugaison et la ponctuation
@@ -81,15 +81,15 @@ FORMAT DE SORTIE (JSON strict):
 }
 
 IMPORTANT : Les positions start/end doivent correspondre exactement aux positions dans le texte original.`
-    },
-    'strict': {
-        id: 'strict' as const,
-        label: 'Strict',
-        description: 'Inclut la typographie française (espaces, guillemets...)',
-        icon: 'Shield',
-        badge: 'Pro',
-        color: 'purple',
-        promptModifier: `Tu es un correcteur orthographique et grammatical expert en français, avec application stricte des règles typographiques.
+  },
+  'strict': {
+    id: 'strict' as const,
+    label: 'Strict',
+    description: 'Inclut la typographie française (espaces, guillemets...)',
+    icon: 'Shield',
+    badge: 'Pro',
+    color: 'purple',
+    promptModifier: `Tu es un correcteur orthographique et grammatical expert en français, avec application stricte des règles typographiques.
 
 RÈGLES STRICTES :
 - Corrige l'orthographe, la grammaire, la conjugaison et la ponctuation
@@ -126,11 +126,15 @@ FORMAT DE SORTIE (JSON strict):
 }
 
 IMPORTANT : Les positions start/end doivent correspondre exactement aux positions dans le texte original.`
-    }
+  }
 } as const;
 
 export type CorrectionModeConfig = typeof CORRECTION_MODES[keyof typeof CORRECTION_MODES];
 
 export function getModeConfig(mode: CorrectionMode): CorrectionModeConfig {
-    return CORRECTION_MODES[mode];
+  // Fallback pour les nouveaux modes non encore configurés
+  if (mode === 'zero-risk' || mode === 'typography-only') {
+    return CORRECTION_MODES['strict'];
+  }
+  return CORRECTION_MODES[mode as keyof typeof CORRECTION_MODES];
 }
