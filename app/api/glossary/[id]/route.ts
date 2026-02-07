@@ -7,9 +7,10 @@ import { createClient } from '@/lib/supabase/server';
  */
 export async function DELETE(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const { id } = await params;
         const supabase = await createClient();
 
         // Vérifier l'authentification
@@ -22,7 +23,7 @@ export async function DELETE(
             );
         }
 
-        const { id } = params;
+        // const { id } = params; // Removed as it is now awaited above
 
         // Supprimer le terme
         const { error } = await supabase
@@ -56,9 +57,10 @@ export async function DELETE(
  */
 export async function PATCH(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
+        const { id } = await params;
         const supabase = await createClient();
 
         // Vérifier l'authentification
@@ -71,7 +73,7 @@ export async function PATCH(
             );
         }
 
-        const { id } = params;
+        // const { id } = params; // Removed as it is now awaited above
         const body = await request.json();
         const { term, category } = body;
 
